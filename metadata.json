@@ -1,0 +1,5 @@
+{
+  "name": "Intelligent Workspace",
+  "description": "A productivity workspace combining Notion-like document editing with AI-powered expense tracking and categorization.",
+  "requestFramePermissions": []
+}
