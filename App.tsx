@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import BlockEditor from './components/Editor/BlockEditor';
-import ExpenseView from './components/ExpenseTracker/ExpenseView';
-import { ViewMode, Page, BlockType, Transaction } from './types';
-import { Menu, MoreHorizontal, Moon, Sun, Monitor, Search, LogOut, Layout, Cloud, Check, CloudOff } from 'lucide-react';
+import Dashboard from './components/Dashboard/Dashboard';
+import MobileRestriction from './components/MobileRestriction';
+
+import { ViewMode, Page, BlockType, Workspace } from './types';
+import { Menu, MoreHorizontal, Moon, Sun, Check, Cloud, LogOut, Monitor } from 'lucide-react';
 import SearchDialog from './components/SearchDialog';
 import { useAuth } from './components/AuthProvider';
 import { persistenceService } from './services/persistenceService';
@@ -41,20 +43,18 @@ const INITIAL_PAGES: Page[] = [
   }
 ];
 
-const INITIAL_TRANSACTIONS: Transaction[] = [
-  { id: 't1', date: '2023-10-24', merchant: 'Starbucks', amount: 5.45, category: 'Food & Drink', status: 'cleared' },
-  { id: 't2', date: '2023-10-23', merchant: 'Uber', amount: 18.20, category: 'Transport', status: 'cleared' },
-  { id: 't3', date: '2023-10-22', merchant: 'Netflix', amount: 15.99, category: 'Subscriptions', status: 'cleared' },
-  { id: 't4', date: '2023-10-21', merchant: 'Whole Foods', amount: 84.32, category: 'Groceries', status: 'cleared' },
-  { id: 't5', date: '2023-10-20', merchant: 'Shell', amount: 45.00, category: 'Transport', status: 'cleared' },
-];
 
 const App: React.FC = () => {
+  // Data State
   const [pages, setPages] = useState<Page[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [currentView, setCurrentView] = useState<ViewMode>(ViewMode.Page);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
+
+  // UI State
+  const [currentView, setCurrentView] = useState<ViewMode>(ViewMode.Dashboard);
   const [activePageId, setActivePageId] = useState<string | null>(null);
-  const [loading_data, setLoadingData] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -75,6 +75,10 @@ const App: React.FC = () => {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
 
+  // ----------------------------------------------------------------------
+  // EFFECTS: Auth & Boot
+  // ----------------------------------------------------------------------
+
   useEffect(() => {
     if (user) return;
     const interval = setInterval(() => {
@@ -83,7 +87,7 @@ const App: React.FC = () => {
         setFontIndex(nextFontIndex);
         setNextFontIndex((prev) => (prev + 1) % fonts.length);
         setIsFading(false);
-      }, 800); // Half of transition time
+      }, 800);
     }, 3000);
     return () => clearInterval(interval);
   }, [user, nextFontIndex]);
@@ -97,7 +101,6 @@ const App: React.FC = () => {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, [user]);
 
-  // Smooth cursor follow
   useEffect(() => {
     if (user) return;
     let requestRef: number;
@@ -112,14 +115,157 @@ const App: React.FC = () => {
     return () => cancelAnimationFrame(requestRef);
   }, [user, mousePos]);
 
+  // Main Boot Logic
+  useEffect(() => {
+    const bootWorkspace = async () => {
+      if (!user) return;
+      setLoadingData(true);
+
+      try {
+        // 1. Fetch User Profile
+        let profile = await persistenceService.fetchUserProfile(user.uid);
+
+        if (!profile) {
+          // New User or missing profile -> Create default
+          profile = await persistenceService.createUserProfile(user);
+        }
+
+        if (profile.darkMode !== undefined) setDarkMode(profile.darkMode);
+
+        // 2. Fetch User Workspaces
+        const userWorkspaces = await persistenceService.fetchUserWorkspaces(profile.workspaceIds || []);
+
+        let activeWs: Workspace | undefined;
+
+        if (userWorkspaces.length === 0) {
+          // Create Default Private Workspace
+          activeWs = await persistenceService.createWorkspace(user.uid, "My Workspace", "private", true);
+          setWorkspaces([activeWs]);
+        } else {
+          setWorkspaces(userWorkspaces);
+          // Default to first or previously used (TODO: persist last used workspace ID in user profile)
+          activeWs = userWorkspaces[0];
+        }
+
+        setCurrentWorkspace(activeWs);
+
+        // 3. Load Pages for Active Workspace
+        if (activeWs) {
+          await loadWorkspaceData(activeWs.id);
+        }
+
+      } catch (error: any) {
+        console.error("Boot Error:", error);
+        setError(error.message || "Failed to load workspace.");
+      } finally {
+        setLoadingData(false);
+      }
+    };
+
+    if (user) {
+      bootWorkspace();
+    }
+  }, [user]);
+
+  // ----------------------------------------------------------------------
+  // EFFECTS: Mobile Check
+  // ----------------------------------------------------------------------
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const loadWorkspaceData = async (workspaceId: string) => {
+    setLoadingData(true);
+    try {
+      const fetchedPages = await persistenceService.fetchPages(workspaceId);
+      setPages(fetchedPages);
+
+      if (fetchedPages.length > 0) {
+        // If we have pages, maybe select one? Or Dashboard.
+        // setActivePageId(fetchedPages[0].id); 
+      } else {
+        // Empty workspace
+        setPages([]);
+        setActivePageId(null);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  // ----------------------------------------------------------------------
+  // HANDLERS: Workspace
+  // ----------------------------------------------------------------------
+
+  const handleWorkspaceChange = async (workspaceId: string) => {
+    const ws = workspaces.find(w => w.id === workspaceId);
+    if (!ws) return;
+
+    setCurrentWorkspace(ws);
+    setActivePageId(null);
+    setCurrentView(ViewMode.Dashboard);
+    await loadWorkspaceData(workspaceId);
+  };
+
+  const handleWorkspaceCreated = (newWs: Workspace) => {
+    setWorkspaces(prev => [...prev, newWs]);
+    handleWorkspaceChange(newWs.id);
+  };
+
+  const handleJoinWorkspace = (ws: Workspace) => {
+    // Check if already exists in list (shouldn't if passed from InviteDialog success)
+    if (!workspaces.find(w => w.id === ws.id)) {
+      setWorkspaces(prev => [...prev, ws]);
+    }
+    handleWorkspaceChange(ws.id);
+  };
+
+  const handleWorkspaceRenamed = (id: string, name: string) => {
+    setWorkspaces(prev => prev.map(w => w.id === id ? { ...w, name } : w));
+    if (currentWorkspace?.id === id) {
+      setCurrentWorkspace(prev => prev ? { ...prev, name } : null);
+    }
+  };
+
+  const handleWorkspaceDeleted = (id: string) => {
+    // 1. Remove from list
+    const remaining = workspaces.filter(w => w.id !== id);
+    setWorkspaces(remaining);
+
+    // 2. If active was deleted, switch to another
+    if (currentWorkspace?.id === id) {
+      if (remaining.length > 0) {
+        handleWorkspaceChange(remaining[0].id);
+      } else {
+        // Should theoretically not happen if protected workspace exists
+        // But if it does, maybe create one or show empty state?
+        // For now, let's assume one always exists.
+        setCurrentWorkspace(null);
+        setPages([]);
+      }
+    }
+  };
+
+  // ----------------------------------------------------------------------
+  // HANDLERS: Pages (Scoped)
+  // ----------------------------------------------------------------------
+
   const activePage = pages.find(p => p.id === activePageId);
 
-  // History Helper
   const saveToHistory = (newPages: Page[] | ((prev: Page[]) => Page[])) => {
     setPages(prev => {
       const resolvedNewPages = typeof newPages === 'function' ? newPages(prev) : newPages;
       if (JSON.stringify(prev) !== JSON.stringify(resolvedNewPages)) {
-        setUndoStack(u => [...u, prev].slice(-50)); // Keep last 50 states
+        setUndoStack(u => [...u, prev].slice(-50));
         setRedoStack([]);
       }
       return resolvedNewPages;
@@ -142,64 +288,259 @@ const App: React.FC = () => {
     setPages(nextState);
   };
 
-  // Fetch data on login
-  useEffect(() => {
-    if (user) {
-      const loadFromCache = () => {
-        const cachedPages = localStorage.getItem(`pages_${user.uid}`);
-        const cachedTransactions = localStorage.getItem(`transactions_${user.uid}`);
-        const cachedProfile = localStorage.getItem(`user_profile_${user.uid}`);
+  const handleAddPage = (parentId: string | null = null, specificId?: string, shouldNavigate: boolean = true) => {
+    if (!currentWorkspace || !user) return;
 
-        if (cachedPages) {
-          const parsed = JSON.parse(cachedPages);
-          setPages(parsed);
-          if (parsed.length > 0) setActivePageId(parsed[0].id);
-        }
-        if (cachedTransactions) {
-          setTransactions(JSON.parse(cachedTransactions));
-        }
-        if (cachedProfile) {
-          const profile = JSON.parse(cachedProfile);
-          if (profile.darkMode !== undefined) setDarkMode(profile.darkMode);
-        }
-      };
+    const newPageId = specificId || crypto.randomUUID();
+    const newPage: Page = {
+      id: newPageId,
+      title: 'Untitled',
+      updatedAt: new Date(),
+      blocks: [{ id: crypto.randomUUID(), type: BlockType.Heading1, content: 'Untitled' }],
+      parentId,
+      childIds: [],
+      isFavorite: false,
+      isExpanded: true,
+      type: 'page',
+      workspaceId: currentWorkspace.id,
+      ownerId: user.uid
+    };
 
-      const fetchData = async () => {
-        if (!localStorage.getItem(`pages_${user.uid}`)) {
-          setLoadingData(true);
-        }
-        try {
-          const [fetchedPages, fetchedTransactions, fetchedProfile] = await Promise.all([
-            persistenceService.fetchPages(user.uid),
-            persistenceService.fetchTransactions(user.uid),
-            persistenceService.fetchUserProfile(user.uid)
-          ]);
-
-          if (fetchedPages.length > 0) {
-            setPages(fetchedPages);
-            setActivePageId(prev => prev || fetchedPages[0].id);
-          } else if (!localStorage.getItem(`pages_${user.uid}`)) {
-            // Seed initial data for new users only if no cache exists
-            setPages(INITIAL_PAGES);
-            setActivePageId(INITIAL_PAGES[0].id);
+    saveToHistory(currentPages => {
+      let updatedPages = [...currentPages, newPage];
+      if (parentId) {
+        updatedPages = updatedPages.map(p => {
+          if (p.id === parentId) {
+            const updatedParent = { ...p, isExpanded: true, childIds: [...p.childIds, newPageId] };
+            if (p.type === 'folder') {
+              persistenceService.savePage(currentWorkspace.id, updatedParent, 0);
+            }
+            return updatedParent;
           }
-          setTransactions(fetchedTransactions.length > 0 ? fetchedTransactions : INITIAL_TRANSACTIONS);
-          if (fetchedProfile && fetchedProfile.darkMode !== undefined) {
-            setDarkMode(fetchedProfile.darkMode);
-          }
-        } catch (error) {
-          console.error("Error fetching data:", error);
-        } finally {
-          setLoadingData(false);
-        }
-      };
+          return p;
+        });
+      }
+      return updatedPages;
+    });
 
-      loadFromCache();
-      fetchData();
+    if (shouldNavigate) {
+      setActivePageId(newPageId);
+      setCurrentView(ViewMode.Page);
     }
-  }, [user]);
 
-  // Handle theme changes
+    persistenceService.savePage(currentWorkspace.id, newPage, 0);
+  };
+
+  const handleCreateFolder = () => {
+    if (!currentWorkspace || !user) return;
+
+    const folderId = crypto.randomUUID();
+    const newFolder: Page = {
+      id: folderId,
+      title: 'Untitled Folder',
+      updatedAt: new Date(),
+      blocks: [
+        { id: crypto.randomUUID(), type: BlockType.Heading1, content: 'Untitled Folder' }
+      ],
+      parentId: null,
+      childIds: [],
+      isFavorite: false,
+      isExpanded: true,
+      type: 'folder',
+      description: '',
+      workspaceId: currentWorkspace.id,
+      ownerId: user.uid
+    };
+
+    saveToHistory(currentPages => [...currentPages, newFolder]);
+    setActivePageId(folderId);
+    setCurrentView(ViewMode.Page);
+
+    persistenceService.savePage(currentWorkspace.id, newFolder, 0);
+  };
+
+  const handlePageUpdate = (pageId: string, updates: Partial<Page>) => {
+    if (!currentWorkspace || !user) return;
+
+    saveToHistory(currentPages => currentPages.map(p =>
+      p.id === pageId ? { ...p, ...updates } : p
+    ));
+
+    const page = pages.find(p => p.id === pageId);
+    if (page) {
+      persistenceService.savePage(currentWorkspace.id, { ...page, ...updates }, 1000);
+    }
+  };
+
+  const handleRenamePage = (pageId: string, newName: string) => {
+    if (!currentWorkspace || !user) return;
+
+    const sanitizedName = newName.trim() || 'Untitled';
+
+    saveToHistory(currentPages => {
+      return currentPages.map(p => {
+        if (p.id === pageId) {
+          let updatedBlocks = [...p.blocks];
+          const hasH1 = updatedBlocks.length > 0 && updatedBlocks[0].type === BlockType.Heading1;
+
+          if (hasH1) {
+            updatedBlocks[0] = { ...updatedBlocks[0], content: sanitizedName };
+          } else {
+            const newH1 = { id: crypto.randomUUID(), type: BlockType.Heading1, content: sanitizedName };
+            updatedBlocks = [newH1, ...updatedBlocks];
+          }
+          return { ...p, title: sanitizedName, blocks: updatedBlocks };
+        }
+
+        // Update references
+        const hasReference = p.blocks.some(b =>
+          (b.type === BlockType.Page && b.pageId === pageId) ||
+          (b.type === BlockType.PageLink && b.pageId === pageId)
+        );
+        if (hasReference) {
+          return {
+            ...p,
+            blocks: p.blocks.map(b =>
+              ((b.type === BlockType.Page && b.pageId === pageId) ||
+                (b.type === BlockType.PageLink && b.pageId === pageId))
+                ? { ...b, content: sanitizedName }
+                : b
+            )
+          };
+        }
+        return p;
+      });
+    });
+
+    const page = pages.find(p => p.id === pageId);
+    if (page) {
+      const updatedBlocks = page.blocks.map((block, idx) => {
+        if (idx === 0 && block.type === BlockType.Heading1) {
+          return { ...block, content: sanitizedName };
+        }
+        return block;
+      });
+      const updatedPage = { ...page, title: sanitizedName, blocks: updatedBlocks };
+      persistenceService.savePage(currentWorkspace.id, updatedPage, 0);
+    }
+  };
+
+  const handleDeletePage = (id: string) => {
+    if (!currentWorkspace) return;
+
+    const getIdsToDelete = (pageId: string, allPages: Page[]): string[] => {
+      const page = allPages.find(p => p.id === pageId);
+      if (!page) return [];
+      let ids = [pageId];
+      page.childIds.forEach(childId => {
+        ids = [...ids, ...getIdsToDelete(childId, allPages)];
+      });
+      return ids;
+    };
+
+    saveToHistory(currentPages => {
+      const idsToDelete = getIdsToDelete(id, currentPages);
+      const updatedPages = currentPages.filter(p => !idsToDelete.includes(p.id));
+
+      const pageToDelete = currentPages.find(p => p.id === id);
+      let finalPages = updatedPages;
+      if (pageToDelete && pageToDelete.parentId) {
+        finalPages = updatedPages.map(p => {
+          if (p.id === pageToDelete.parentId) {
+            return { ...p, childIds: p.childIds.filter(cid => cid !== id) };
+          }
+          return p;
+        });
+      }
+
+      if (activePageId && idsToDelete.includes(activePageId)) {
+        setTimeout(() => {
+          setActivePageId(null);
+          setCurrentView(ViewMode.Dashboard);
+        }, 0);
+      }
+
+      return finalPages;
+    });
+
+    persistenceService.deletePage(currentWorkspace.id, id);
+  };
+
+  const handleToggleFavorite = (id: string) => {
+    // Note: Favorites could optionally be stored in UserProfile, 
+    // but here they are properties of the Page, so they are workspace-specific implicitly.
+    if (!currentWorkspace) return;
+    saveToHistory(currentPages => currentPages.map(p => {
+      if (p.id === id) {
+        const updated = { ...p, isFavorite: !p.isFavorite };
+        persistenceService.savePage(currentWorkspace.id, updated, 100);
+        return updated;
+      }
+      return p;
+    }));
+  };
+
+  const handleToggleExpand = (id: string) => {
+    saveToHistory(currentPages => currentPages.map(p => p.id === id ? { ...p, isExpanded: !p.isExpanded } : p));
+    // Optional: Persist expansion state if desired, but usually local session or ephemeral
+  };
+
+  const updateActivePageBlocks = (newBlocks: any[]) => {
+    if (!activePageId || !currentWorkspace || !user) return;
+
+    saveToHistory(currentPages => {
+      const firstH1 = newBlocks.find(b => b.type === BlockType.Heading1);
+      const rawTitle = (firstH1 && firstH1.content.trim()) ? firstH1.content : 'Untitled';
+      const newTitle = rawTitle.replace(/<[^>]*>?/gm, '').trim() || 'Untitled';
+
+      return currentPages.map(p => {
+        if (p.id === activePageId) {
+          return { ...p, blocks: newBlocks, title: newTitle };
+        }
+        const hasReference = p.blocks.some(b => b.type === BlockType.Page && b.pageId === activePageId || b.type === BlockType.PageLink && b.pageId === activePageId);
+        if (hasReference) {
+          return {
+            ...p,
+            blocks: p.blocks.map(b =>
+              (b.type === BlockType.Page && b.pageId === activePageId || b.type === BlockType.PageLink && b.pageId === activePageId)
+                ? { ...b, content: newTitle }
+                : b
+            )
+          };
+        }
+        return p;
+      });
+    });
+
+    const updatedPage = pages.find(p => p.id === activePageId);
+    if (updatedPage) {
+      const firstH1 = newBlocks.find(b => b.type === BlockType.Heading1);
+      const rawTitle = (firstH1 && firstH1.content.trim()) ? firstH1.content : 'Untitled';
+      const newTitle = rawTitle.replace(/<[^>]*>?/gm, '').trim() || 'Untitled';
+      const pageToSave = { ...updatedPage, blocks: newBlocks, title: newTitle };
+
+      setSaveStatus('unsaved');
+      persistenceService.savePage(currentWorkspace.id, pageToSave, 5000).then(() => {
+        setSaveStatus('saved');
+      });
+    }
+  };
+
+  const handleManualSave = async () => {
+    if (!user || !activePageId || saveStatus === 'saving' || !currentWorkspace) return;
+
+    const activePage = pages.find(p => p.id === activePageId);
+    if (activePage) {
+      setSaveStatus('saving');
+      await persistenceService.savePage(currentWorkspace.id, activePage, 0);
+      setSaveStatus('saved');
+    }
+  };
+
+  // ----------------------------------------------------------------------
+  // UI HANDLERS
+  // ----------------------------------------------------------------------
+
   const toggleTheme = (isDark: boolean) => {
     setDarkMode(isDark);
     if (user) {
@@ -209,7 +550,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Dark Mode Effect
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -218,7 +558,6 @@ const App: React.FC = () => {
     }
   }, [darkMode]);
 
-  // Click outside menu
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -226,11 +565,9 @@ const App: React.FC = () => {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Keyboard Shortcuts (Cmd+K, Undo/Redo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey)) {
@@ -253,166 +590,20 @@ const App: React.FC = () => {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [undoStack, redoStack, pages]); // Added dependencies for undo/redo handlers
+  }, [undoStack, redoStack, pages]);
 
-  // Navigation Handlers
   const handlePageSelect = (id: string) => {
+    saveToHistory(currentPages => currentPages.map(p => p.id === id ? { ...p, lastOpenedAt: Date.now() } : p));
     setActivePageId(id);
     setCurrentView(ViewMode.Page);
     if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
-  const handleAddPage = (parentId: string | null = null, specificId?: string, shouldNavigate: boolean = true) => {
-    const newPageId = specificId || crypto.randomUUID();
-    const newPage: Page = {
-      id: newPageId,
-      title: 'Untitled',
-      updatedAt: new Date(),
-      blocks: [{ id: crypto.randomUUID(), type: BlockType.Heading1, content: 'Untitled' }],
-      parentId,
-      childIds: [],
-      isFavorite: false,
-      isExpanded: true
-    };
+  // ----------------------------------------------------------------------
+  // RENDER
+  // ----------------------------------------------------------------------
 
-    saveToHistory(currentPages => {
-      let updatedPages = [...currentPages, newPage];
-
-      // If adding a subpage, update the parent's childIds
-      if (parentId) {
-        updatedPages = updatedPages.map(p => {
-          if (p.id === parentId) {
-            return { ...p, isExpanded: true, childIds: [...p.childIds, newPageId] };
-          }
-          return p;
-        });
-      }
-      return updatedPages;
-    });
-
-    if (shouldNavigate) {
-      setActivePageId(newPageId);
-      setCurrentView(ViewMode.Page);
-    }
-
-    if (user) {
-      persistenceService.savePage(user.uid, newPage, 0); // Save immediately on create
-    }
-  };
-
-  const handleDeletePage = (id: string) => {
-    // Recursive delete helper
-    const getIdsToDelete = (pageId: string, allPages: Page[]): string[] => {
-      const page = allPages.find(p => p.id === pageId);
-      if (!page) return [];
-      let ids = [pageId];
-      page.childIds.forEach(childId => {
-        ids = [...ids, ...getIdsToDelete(childId, allPages)];
-      });
-      return ids;
-    };
-
-    saveToHistory(currentPages => {
-      const idsToDelete = getIdsToDelete(id, currentPages);
-      const updatedPages = currentPages.filter(p => !idsToDelete.includes(p.id));
-
-      // Remove from parent's childIds if applicable
-      const pageToDelete = currentPages.find(p => p.id === id);
-      let finalPages = updatedPages;
-      if (pageToDelete && pageToDelete.parentId) {
-        finalPages = updatedPages.map(p => {
-          if (p.id === pageToDelete.parentId) {
-            return { ...p, childIds: p.childIds.filter(cid => cid !== id) };
-          }
-          return p;
-        });
-      }
-
-      // Check if we need to navigate away (side-effect inside state update logic, but safe for check)
-      if (activePageId && idsToDelete.includes(activePageId)) {
-        setTimeout(() => {
-          if (idsToDelete.includes(activePageId!)) {
-            setActivePageId(null);
-            setCurrentView(ViewMode.Dashboard);
-          }
-        }, 0);
-      }
-
-      return finalPages;
-    });
-
-    if (user) {
-      persistenceService.deletePage(id);
-    }
-  };
-
-  const handleToggleFavorite = (id: string) => {
-    saveToHistory(currentPages => currentPages.map(p => p.id === id ? { ...p, isFavorite: !p.isFavorite } : p));
-  };
-
-  const handleToggleExpand = (id: string) => {
-    saveToHistory(currentPages => currentPages.map(p => p.id === id ? { ...p, isExpanded: !p.isExpanded } : p));
-  };
-
-  const updateActivePageBlocks = (newBlocks: any[]) => {
-    if (!activePageId) return;
-    saveToHistory(currentPages => {
-      // 1. Calculate the new title for the active page
-      const firstH1 = newBlocks.find(b => b.type === BlockType.Heading1);
-      // Use H1 content if available, otherwise default to 'Untitled' (never allow empty string title)
-      const newTitle = (firstH1 && firstH1.content.trim()) ? firstH1.content : 'Untitled';
-
-      return currentPages.map(p => {
-        // Update the active page itself
-        if (p.id === activePageId) {
-          return { ...p, blocks: newBlocks, title: newTitle };
-        }
-
-        // Update any other page that might contain a Page block pointing to the active page
-        const hasReference = p.blocks.some(b => b.type === BlockType.Page && b.pageId === activePageId || b.type === BlockType.PageLink && b.pageId === activePageId);
-        if (hasReference) {
-          return {
-            ...p,
-            blocks: p.blocks.map(b =>
-              (b.type === BlockType.Page && b.pageId === activePageId || b.type === BlockType.PageLink && b.pageId === activePageId)
-                ? { ...b, content: newTitle }
-                : b
-            )
-          };
-        }
-
-        return p;
-      });
-    });
-
-    // Save active page to Firestore with debounce
-    if (user && activePageId) {
-      const updatedPage = pages.find(p => p.id === activePageId);
-      if (updatedPage) {
-        const firstH1 = newBlocks.find(b => b.type === BlockType.Heading1);
-        const newTitle = (firstH1 && firstH1.content.trim()) ? firstH1.content : 'Untitled';
-        const pageToSave = { ...updatedPage, blocks: newBlocks, title: newTitle };
-
-        setSaveStatus('unsaved');
-        persistenceService.savePage(user.uid, pageToSave, 5000).then(() => {
-          setSaveStatus('saved');
-        });
-      }
-    }
-  };
-
-  const handleManualSave = async () => {
-    if (!user || !activePageId || saveStatus === 'saving') return;
-
-    const activePage = pages.find(p => p.id === activePageId);
-    if (activePage) {
-      setSaveStatus('saving');
-      await persistenceService.savePage(user.uid, activePage, 0);
-      setSaveStatus('saved');
-    }
-  };
-
-  if (authLoading || loading_data) {
+  if (authLoading || loadingData) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-white dark:bg-[#0C0C0C]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white"></div>
@@ -423,7 +614,6 @@ const App: React.FC = () => {
   if (!user) {
     return (
       <div className="min-h-screen w-full bg-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-white selection:text-black cursor-none">
-        {/* Custom Dot Cursor */}
         <div
           className="fixed w-[38px] h-[38px] bg-white rounded-full pointer-events-none z-[100] mix-blend-difference"
           style={{
@@ -432,8 +622,6 @@ const App: React.FC = () => {
             transform: 'translate(-50%, -50%)'
           }}
         />
-
-        {/* Mouse Blur Effect */}
         <div
           className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-500"
           style={{
@@ -441,9 +629,16 @@ const App: React.FC = () => {
           }}
         />
 
+        {error && (
+          <div className="absolute top-4 w-full flex justify-center z-50">
+            <div className="bg-red-500/10 border border-red-500/50 text-red-500 px-4 py-2 rounded-lg text-sm backdrop-blur-md">
+              {error} <button onClick={() => window.location.reload()} className="underline ml-2">Retry</button>
+            </div>
+          </div>
+        )}
+
         <main className="z-10 flex flex-col items-center gap-8 text-center animate-fade-in">
           <div className="flex flex-col items-center gap-2 relative h-24 md:h-32 justify-center">
-            {/* Smooth Cross-fade Typography */}
             <h1 className={`absolute text-7xl md:text-9xl font-bold tracking-tighter transition-all duration-1000 ${fonts[fontIndex]} ${isFading ? 'opacity-0 scale-95 blur-sm' : 'opacity-100 scale-100 blur-[0.3px]'}`}>
               COMPILE.
             </h1>
@@ -458,19 +653,32 @@ const App: React.FC = () => {
           </div>
 
           <div className="mt-16 flex flex-col items-center gap-4">
-            <button
-              onClick={login}
-              className="group relative flex items-center justify-center gap-3 px-8 py-3 bg-white text-black rounded-full font-medium hover:bg-gray-200 transition-all active:scale-95 cursor-none"
-            >
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 pointer-events-none" alt="Google" />
-              Sign in to continue
-            </button>
-            <p className="text-[10px] text-gray-600 tracking-widest uppercase">
-              Secure authentication via Google
-            </p>
+            {isMobile ? (
+              <div className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-white/5 backdrop-blur-sm border border-white/10 text-center animate-fade-in max-w-xs">
+                <div className="p-3 bg-white/10 rounded-full mb-1">
+                  <Monitor size={20} className="text-white/80" />
+                </div>
+                <p className="text-sm font-medium text-white/90 tracking-wide">Desktop Experience Only</p>
+                <p className="text-[11px] text-gray-400 leading-relaxed font-light">
+                  Please open this URL on a desktop or laptop device to continue.
+                </p>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={login}
+                  className="group relative flex items-center justify-center gap-3 px-8 py-3 bg-white text-black rounded-full font-medium hover:bg-gray-200 transition-all active:scale-95 cursor-none"
+                >
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 pointer-events-none" alt="Google" />
+                  Sign in to continue
+                </button>
+                <p className="text-[10px] text-gray-600 tracking-widest uppercase">
+                  Secure authentication via Google
+                </p>
+              </>
+            )}
           </div>
         </main>
-
         <footer className="absolute bottom-8 text-[10px] text-gray-700 tracking-[0.3em] uppercase">
           © {new Date().getFullYear()} COMPILE.
         </footer>
@@ -479,197 +687,196 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex w-full h-screen bg-white dark:bg-[#0C0C0C] text-[#37352F] dark:text-gray-100 transition-colors duration-200">
+    <>
+      {isMobile && user && <MobileRestriction />}
+      <div className={`flex w-full h-screen bg-white dark:bg-[#0C0C0C] text-[#37352F] dark:text-gray-100 transition-colors duration-200 ${isMobile && user ? 'filter blur-md pointer-events-none select-none overflow-hidden' : ''}`}>
 
-      {/* Sidebar (Desktop) */}
-      <div className={`${isSidebarOpen ? 'block' : 'hidden'} md:block shrink-0 h-full border-r border-gray-200 dark:border-gray-800`}>
-        <Sidebar
-          pages={pages}
-          currentView={currentView}
-          activePageId={activePageId}
-          onViewChange={(view) => { setCurrentView(view); if (window.innerWidth < 768) setSidebarOpen(false); }}
-          onPageSelect={handlePageSelect}
-          onAddPage={() => handleAddPage(null)}
-          onAddSubPage={(parentId) => handleAddPage(parentId)}
-          onDeletePage={handleDeletePage}
-          onToggleFavorite={handleToggleFavorite}
-          onToggleExpand={handleToggleExpand}
-          onSearch={() => setShowSearch(true)}
-        />
-      </div>
+        <div className={`${isSidebarOpen ? 'block' : 'hidden'} md:block shrink-0 h-full border-r border-gray-200 dark:border-gray-800`}>
+          <Sidebar
+            pages={pages}
+            currentView={currentView}
+            activePageId={activePageId}
+            onViewChange={(view) => { setCurrentView(view); if (window.innerWidth < 768) setSidebarOpen(false); }}
+            onPageSelect={handlePageSelect}
+            onAddPage={() => handleAddPage(null)}
+            onAddSubPage={(parentId) => handleAddPage(parentId)}
+            onDeletePage={handleDeletePage}
+            onToggleFavorite={handleToggleFavorite}
+            onToggleExpand={handleToggleExpand}
+            onSearch={() => setShowSearch(true)}
+            onAddFolder={handleCreateFolder}
+            onRenamePage={handleRenamePage}
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-white dark:bg-[#0C0C0C]">
-
-        {/* Topbar */}
-        <div className="h-12 border-b border-transparent hover:border-gray-100 dark:hover:border-gray-800 flex items-center px-4 justify-between shrink-0 transition-colors z-20">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setSidebarOpen(!isSidebarOpen)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-500 dark:text-gray-400"
-            >
-              <Menu size={18} />
-            </button>
-            <div className="text-sm breadcrumbs text-gray-600 dark:text-gray-400 flex items-center gap-1">
-              {currentView === ViewMode.Page && activePage && (
-                <>
-                  {(() => {
-                    const breadcrumbs = [];
-                    let curr: Page | undefined = activePage;
-                    while (curr) {
-                      breadcrumbs.unshift(curr);
-                      if (curr.parentId) {
-                        curr = pages.find(p => p.id === curr!.parentId);
-                      } else {
-                        curr = undefined;
-                      }
-                    }
-                    return (
-                      <>
-                        <span className="opacity-70 hover:underline cursor-pointer" onClick={() => setCurrentView(ViewMode.Dashboard)}>Workspace</span>
-                        <span className="opacity-40">/</span>
-                        {breadcrumbs.map((page, index) => (
-                          <React.Fragment key={page.id}>
-                            <span
-                              className={`truncate max-w-[150px] cursor-pointer hover:underline ${index === breadcrumbs.length - 1 ? 'font-medium text-gray-900 dark:text-gray-100' : ''}`}
-                              onClick={() => handlePageSelect(page.id)}
-                            >
-                              {page.title}
-                            </span>
-                            {index < breadcrumbs.length - 1 && <span className="opacity-40">/</span>}
-                          </React.Fragment>
-                        ))}
-                      </>
-                    );
-                  })()}
-                </>
-              )}
-              {currentView === ViewMode.Expenses && <span className="font-medium text-gray-900 dark:text-gray-100">Expenses</span>}
-              {currentView === ViewMode.Dashboard && <span className="font-medium text-gray-900 dark:text-gray-100">Dashboard</span>}
-            </div>
-
-            {/* Save Status Indicator */}
-            <div
-              className="ml-4 flex items-center gap-1.5 transition-all duration-300"
-            >
-              {saveStatus === 'unsaved' && (
-                <button
-                  onClick={handleManualSave}
-                  className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 animate-in fade-in slide-in-from-left-1"
-                >
-                  <Cloud size={12} />
-                  <span>Unsaved</span>
-                </button>
-              )}
-              {saveStatus === 'saving' && (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium text-gray-400">
-                  <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </div>
-              )}
-              {saveStatus === 'saved' && (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium text-green-600 dark:text-green-500 opacity-0 hover:opacity-100 transition-opacity">
-                  <Check size={12} />
-                  <span>Saved</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            >
-              <MoreHorizontal size={18} />
-            </button>
-
-            {showMenu && (
-              <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 text-sm animate-in fade-in zoom-in-95 duration-100">
-                <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Appearance</p>
-                  <div className="flex items-center gap-2 p-1 bg-gray-100 dark:bg-gray-900 rounded-lg">
-                    <button
-                      onClick={() => toggleTheme(false)}
-                      className={`flex-1 flex justify-center p-1 rounded ${!darkMode ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-gray-500'}`}
-                    >
-                      <Sun size={14} />
-                    </button>
-                    <button
-                      onClick={() => toggleTheme(true)}
-                      className={`flex-1 flex justify-center p-1 rounded ${darkMode ? 'bg-white dark:bg-gray-600 shadow-sm text-white' : 'text-gray-500'}`}
-                    >
-                      <Moon size={14} />
-                    </button>
-                  </div>
-                </div>
-                <button className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
-                  Export Page
-                </button>
-                <button
-                  onClick={() => { if (activePage) handleDeletePage(activePage.id); }}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 text-red-600 border-b border-gray-100 dark:border-gray-700"
-                >
-                  Delete Page
-                </button>
-                <button
-                  onClick={logout}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 flex items-center gap-2"
-                >
-                  <LogOut size={14} />
-                  Sign Out
-                </button>
-              </div>
-            )}
-          </div>
+            // Workspace Props
+            workspaces={workspaces}
+            activeWorkspaceId={currentWorkspace?.id || null}
+            onWorkspaceChange={handleWorkspaceChange}
+            onWorkspaceCreated={handleWorkspaceCreated}
+            onJoinWorkspace={handleJoinWorkspace}
+            onWorkspaceRenamed={handleWorkspaceRenamed}
+            onWorkspaceDeleted={handleWorkspaceDeleted}
+            userId={user.uid}
+            userEmail={user.email || ''}
+          />
         </div>
 
-        {/* View Content */}
-        <main className="flex-1 overflow-y-auto">
-          {currentView === ViewMode.Page && activePage ? (
-            <div className="min-h-full pb-32">
-              <div className="max-w-3xl mx-auto pt-12 px-6 sm:px-12">
-                <BlockEditor
-                  activePageId={activePage.id}
-                  blocks={activePage.blocks}
-                  pages={pages}
-                  onChange={updateActivePageBlocks}
-                  onCreatePage={() => {
-                    // Creating a page from the editor always nests it under the current page
-                    const newId = crypto.randomUUID();
-                    handleAddPage(activePage.id, newId, true);
-                    return newId;
-                  }}
-                  onNavigateToPage={handlePageSelect}
-                  onNavigateUp={() => { }} // Placeholder or real logic
-                  onNavigateDown={() => { }} // Placeholder or real logic
-                  onDeletePage={handleDeletePage}
-                />
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-white dark:bg-[#0C0C0C]">
+          {/* Topbar */}
+          <div className="h-12 border-b border-transparent hover:border-gray-100 dark:hover:border-gray-800 flex items-center px-4 justify-between shrink-0 transition-colors z-20">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(!isSidebarOpen)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-500 dark:text-gray-400"
+              >
+                <Menu size={18} />
+              </button>
+              <div className="text-sm breadcrumbs text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                {currentView === ViewMode.Page && activePage && (
+                  <>
+                    {(() => {
+                      const breadcrumbs = [];
+                      let curr: Page | undefined = activePage;
+                      while (curr) {
+                        breadcrumbs.unshift(curr);
+                        if (curr.parentId) {
+                          curr = pages.find(p => p.id === curr!.parentId);
+                        } else {
+                          curr = undefined;
+                        }
+                      }
+                      return (
+                        <>
+                          <span className="opacity-70 hover:underline cursor-pointer" onClick={() => setCurrentView(ViewMode.Dashboard)}>
+                            {currentWorkspace?.name || 'Workspace'}
+                          </span>
+                          <span className="opacity-40">/</span>
+                          {breadcrumbs.map((page, index) => (
+                            <React.Fragment key={page.id}>
+                              <span
+                                className={`truncate max-w-[150px] cursor-pointer hover:underline ${index === breadcrumbs.length - 1 ? 'font-medium text-gray-900 dark:text-gray-100' : ''}`}
+                                onClick={() => handlePageSelect(page.id)}
+                              >
+                                {page.title}
+                              </span>
+                              {index < breadcrumbs.length - 1 && <span className="opacity-40">/</span>}
+                            </React.Fragment>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+                {currentView === ViewMode.Dashboard && <span className="font-medium text-gray-900 dark:text-gray-100">Dashboard</span>}
+              </div>
+
+              <div className="ml-4 flex items-center gap-1.5 transition-all duration-300">
+                {saveStatus === 'unsaved' && (
+                  <button
+                    onClick={handleManualSave}
+                    className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 animate-in fade-in slide-in-from-left-1"
+                  >
+                    <Cloud size={12} />
+                    <span>Unsaved</span>
+                  </button>
+                )}
+                {saveStatus === 'saving' && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium text-gray-400">
+                    <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </div>
+                )}
+                {saveStatus === 'saved' && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium text-green-600 dark:text-green-500 opacity-0 hover:opacity-100 transition-opacity">
+                    <Check size={12} />
+                    <span>Saved</span>
+                  </div>
+                )}
               </div>
             </div>
-          ) : currentView === ViewMode.Expenses ? (
-            <ExpenseView
-              transactions={transactions}
-              onAddTransaction={(t) => {
-                setTransactions([t, ...transactions]);
-                if (user) persistenceService.saveTransaction(user.uid, t);
-              }}
-              onBulkAdd={(ts) => {
-                setTransactions([...ts, ...transactions]);
-                if (user) {
-                  ts.forEach(t => persistenceService.saveTransaction(user.uid, t));
-                }
-              }}
-            />
-          ) : (
-            <div className="p-12 max-w-4xl mx-auto text-center space-y-4">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome to COMPILE.</h1>
-              <p className="text-gray-600 dark:text-gray-400">Select a page from the sidebar or navigate to your Expenses.</p>
+
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 text-sm animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Appearance</p>
+                    <div className="flex items-center gap-2 p-1 bg-gray-100 dark:bg-gray-900 rounded-lg">
+                      <button
+                        onClick={() => toggleTheme(false)}
+                        className={`flex-1 flex justify-center p-1 rounded ${!darkMode ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-gray-500'}`}
+                      >
+                        <Sun size={14} />
+                      </button>
+                      <button
+                        onClick={() => toggleTheme(true)}
+                        className={`flex-1 flex justify-center p-1 rounded ${darkMode ? 'bg-white dark:bg-gray-600 shadow-sm text-white' : 'text-gray-500'}`}
+                      >
+                        <Moon size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <button className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300">
+                    Export Page
+                  </button>
+                  <button
+                    onClick={() => { if (activePage) handleDeletePage(activePage.id); }}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 text-red-600 border-b border-gray-100 dark:border-gray-700"
+                  >
+                    Delete Page
+                  </button>
+                  <button
+                    onClick={logout}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 flex items-center gap-2"
+                  >
+                    <LogOut size={14} />
+                    Sign Out
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </main>
+          </div>
+
+          <main className="flex-1 overflow-y-auto">
+            {currentView === ViewMode.Page && activePage && currentWorkspace ? (
+              <div className="min-h-full pb-32">
+                <div className="max-w-3xl mx-auto pt-12 px-6 sm:px-12">
+                  <BlockEditor
+                    activePageId={activePageId}
+                    activePage={activePage}
+                    blocks={activePage.blocks}
+                    pages={pages}
+                    onChange={updateActivePageBlocks}
+                    onUpdatePage={handlePageUpdate}
+                    onCreatePage={() => handleAddPage(activePageId)}
+                    onNavigateToPage={handlePageSelect}
+                    onDeletePage={handleDeletePage}
+                  />
+                </div>
+              </div>
+            ) : currentView === ViewMode.Dashboard ? (
+              <Dashboard
+                pages={pages}
+                onPageSelect={handlePageSelect}
+                onAddPage={(parentId) => handleAddPage(parentId)}
+                onAddFolder={handleCreateFolder}
+              />
+            ) : null}
+          </main>
+        </div>
+        <SearchDialog
+          isOpen={showSearch}
+          onClose={() => setShowSearch(false)}
+          pages={pages}
+          onSelect={handlePageSelect}
+        />
       </div>
-    </div>
+    </>
   );
 };
 

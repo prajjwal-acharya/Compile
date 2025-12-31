@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, FileText } from 'lucide-react';
+import { Search, FileText, Folder } from 'lucide-react';
 import { Page } from '../types';
 
 interface SearchDialogProps {
@@ -77,7 +77,7 @@ const SearchDialog: React.FC<SearchDialogProps> = ({ isOpen, onClose, pages, onS
                                 onClick={() => { onSelect(page.id); onClose(); }}
                                 onMouseEnter={() => setSelectedIndex(idx)}
                             >
-                                <FileText size={18} className="text-gray-400" />
+                                {page.type === 'folder' ? <Folder size={18} className="text-gray-400" /> : <FileText size={18} className="text-gray-400" />}
                                 <div className="flex-1 min-w-0">
                                     <div className={`text-sm font-medium truncate ${idx === selectedIndex ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
                                         {page.title}

@@ -1,0 +1,214 @@
+/* Dashboard.css */
+.dashboard-container {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 40px 24px;
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.dashboard-header {
+    margin-bottom: 48px;
+}
+
+.dashboard-title {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-main);
+}
+
+.dashboard-subtitle {
+    font-size: 16px;
+    color: var(--text-secondary);
+}
+
+/* Sections Grid */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 24px;
+}
+
+.dashboard-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+    padding: 24px;
+    transition: all 0.2s ease;
+}
+
+.dark .dashboard-section {
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dashboard-section:hover {
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+}
+
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Quick Actions */
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.quick-action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.dark .quick-action-btn {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+.quick-action-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+.dark .quick-action-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.quick-action-icon {
+    width: 24px;
+    height: 24px;
+    color: #4B4B4B;
+}
+
+.dark .quick-action-icon {
+    color: #A1A1A1;
+}
+
+.quick-action-label {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* Recent & Pinned */
+.page-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.page-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.page-item:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.dark .page-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.page-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--text-secondary);
+}
+
+.page-title {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Today Section */
+.today-content {
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 8px;
+    padding: 16px;
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+.dark .today-content {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Databases */
+.db-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.db-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 8px;
+}
+
+.dark .db-item {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.db-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Tree Preview */
+.tree-preview {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.tree-node {
+    padding-left: 12px;
+    border-left: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.dark .tree-node {
+    border-left-color: rgba(255, 255, 255, 0.1);
+}

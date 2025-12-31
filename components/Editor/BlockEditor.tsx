@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Block, BlockType, Page } from '../../types';
-import { suggestNextBlock } from '../../services/geminiService';
 import { BLOCK_TYPES } from './constants';
 import { SlashMenu } from './UI/SlashMenu';
 import { FloatingToolbar } from './UI/FloatingToolbar';
 import { EditableBlock } from './BlockComponents/EditableBlock';
 import { PageSelector } from './UI/PageSelector';
+
 import { AlertTriangle, Info } from 'lucide-react';
 
 const MAX_BLOCKS = 1800;
@@ -13,17 +13,18 @@ const WARN_BLOCKS = 1500;
 
 interface BlockEditorProps {
   activePageId: string;
+  activePage?: Page;
   blocks: Block[];
   pages: Page[]; // Added pages for linking
-  onChange: (blocks: Block[]) => void;
-  onCreatePage: () => string; // Returns new page ID
+  onChange: (blocks: Block[]) => void; // Made explicit
+  onUpdatePage?: (pageId: string, updates: Partial<Page>) => void;
+  onCreatePage: () => string;
   onNavigateToPage: (pageId: string) => void;
   onDeletePage: (pageId: string) => void;
 }
 
-const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, onChange, onCreatePage, onNavigateToPage, onDeletePage }) => {
+const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, activePage, blocks, pages, onChange, onUpdatePage, onCreatePage, onNavigateToPage, onDeletePage }) => {
   const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
-  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [collapsedBlockIds, setCollapsedBlockIds] = useState<Set<string>>(new Set());
 
   // Load collapse state from localStorage
@@ -73,6 +74,7 @@ const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, 
   const [pageSelectorPosition, setPageSelectorPosition] = useState({ top: 0, left: 0 });
   const [pageSelectorIndex, setPageSelectorIndex] = useState<number>(-1);
 
+
   // Floating Toolbar State
   const [toolbarPosition, setToolbarPosition] = useState<{ top: number, left: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -113,6 +115,13 @@ const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, 
     const index = blocks.findIndex(b => b.id === id);
     const blockToDelete = blocks[index];
 
+    // Protect the first H1 block (page title) - can't be deleted
+    if (index === 0 && blockToDelete.type === BlockType.Heading1) {
+      // Instead of deleting, just clear the content (will show "Untitled" placeholder)
+      updateBlock(id, { content: '' });
+      return;
+    }
+
     // If deleting a page block, also delete the actual page
     if (blockToDelete.type === BlockType.Page && blockToDelete.pageId) {
       onDeletePage(blockToDelete.pageId);
@@ -137,6 +146,8 @@ const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, 
     setSlashMenuOpen(false);
     setSlashMenuIndex(-1);
   };
+
+
 
   const closePageSelector = () => {
     setPageSelectorOpen(false);
@@ -177,6 +188,8 @@ const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, 
     closePageSelector();
     setFocusedBlockId(block.id);
   };
+
+
 
   // Selection Change Handler
   useEffect(() => {
@@ -279,39 +292,63 @@ const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, 
             if (isHidden) return null;
 
             return (
-              <EditableBlock
-                key={block.id}
-                block={block}
-                indexInList={block.type === BlockType.Number ? numberingCounter : undefined}
-                isFocused={focusedBlockId === block.id}
-                isCollapsed={isCollapsed}
-                onToggleCollapse={() => toggleCollapse(block.id)}
-                onUpdate={(updates) => updateBlock(block.id, updates)}
-                onFocus={() => setFocusedBlockId(block.id)}
-                onAddNext={() => addBlock(index,
-                  block.type === BlockType.Bullet ? BlockType.Bullet :
-                    block.type === BlockType.Number ? BlockType.Number :
-                      block.type === BlockType.Todo ? BlockType.Todo :
-                        block.type === BlockType.Toggle ? BlockType.Toggle :
-                          BlockType.Text
+              <React.Fragment key={block.id}>
+                <EditableBlock
+                  block={block}
+                  indexInList={block.type === BlockType.Number ? numberingCounter : undefined}
+                  isFocused={focusedBlockId === block.id}
+                  isCollapsed={isCollapsed}
+                  isPageTitle={index === 0 && block.type === BlockType.Heading1}
+                  onToggleCollapse={() => toggleCollapse(block.id)}
+                  onUpdate={(updates) => updateBlock(block.id, updates)}
+                  onFocus={() => setFocusedBlockId(block.id)}
+
+                  onAddNext={() => addBlock(index,
+                    block.type === BlockType.Bullet ? BlockType.Bullet :
+                      block.type === BlockType.Number ? BlockType.Number :
+                        block.type === BlockType.Todo ? BlockType.Todo :
+                          block.type === BlockType.Toggle ? BlockType.Toggle :
+                            block.type === BlockType.Code ? BlockType.Text :
+                              BlockType.Text
+                  )}
+                  onDelete={() => removeBlock(block.id)}
+                  onOpenMenu={(rect) => openSlashMenu(index, rect)}
+                  slashMenuOpen={slashMenuOpen && slashMenuIndex === index}
+                  onSlashFilterChange={setSlashMenuFilter}
+                  onNavigateUp={() => index > 0 && setFocusedBlockId(blocks[index - 1].id)}
+                  onNavigateDown={() => index < blocks.length - 1 && setFocusedBlockId(blocks[index + 1].id)}
+                  onNavigateToPage={onNavigateToPage}
+                />
+
+                {/* Child Pages List */}
+                {index === 0 && activePage?.type === 'folder' && (
+                  <div className="pl-12 mb-8 mt-4">
+                    <div className="text-xs font-semibold text-gray-400 dark:text-gray-500 mb-2 uppercase tracking-wider">
+                      Pages in this folder
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {pages.filter(p => p.parentId === activePageId).map(childPage => (
+                        <div
+                          key={childPage.id}
+                          onClick={() => onNavigateToPage(childPage.id)}
+                          className="flex items-center gap-2 p-2 -ml-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer text-gray-700 dark:text-gray-300 transition-colors group/link"
+                        >
+                          <span className="text-lg opacity-70 group-hover/link:opacity-100">📄</span>
+                          <span className="font-medium underline decoration-transparent group-hover/link:decoration-gray-300 underline-offset-4">
+                            {childPage.title || 'Untitled'}
+                          </span>
+                        </div>
+                      ))}
+                      {pages.filter(p => p.parentId === activePageId).length === 0 && (
+                        <div className="text-sm text-gray-400 italic py-2">
+                          No pages yet. Click "+" in sidebar to add one.
+                        </div>
+                      )}
+                    </div>
+                    <div className="h-px bg-gray-200 dark:bg-gray-800 my-6 w-full" />
+                  </div>
                 )}
-                onDelete={() => removeBlock(block.id)}
-                onOpenMenu={(rect) => openSlashMenu(index, rect)}
-                slashMenuOpen={slashMenuOpen && slashMenuIndex === index}
-                onSlashFilterChange={setSlashMenuFilter}
-                onNavigateUp={() => index > 0 && setFocusedBlockId(blocks[index - 1].id)}
-                onNavigateDown={() => index < blocks.length - 1 && setFocusedBlockId(blocks[index + 1].id)}
-                onRequestSuggestion={() => {
-                  if (!loadingSuggestion) {
-                    setLoadingSuggestion(true);
-                    suggestNextBlock(blocks.map(b => b.content).join('\n')).then(text => {
-                      updateBlock(block.id, { content: block.content + " " + text });
-                      setLoadingSuggestion(false);
-                    });
-                  }
-                }}
-                onNavigateToPage={onNavigateToPage}
-              />
+              </React.Fragment>
             );
           });
         })()}
@@ -335,11 +372,8 @@ const BlockEditor: React.FC<BlockEditorProps> = ({ activePageId, blocks, pages, 
         />
       )}
 
-      {loadingSuggestion && (
-        <div className="text-xs text-purple-500 animate-pulse mt-4 flex items-center gap-1 justify-center">
-          <span className="i-lucide-sparkles w-3 h-3" /> AI is writing...
-        </div>
-      )}
+
+
     </div>
   );
 };

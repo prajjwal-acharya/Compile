@@ -43,28 +43,37 @@ export interface Page {
   childIds: string[];
   isFavorite: boolean;
   isExpanded: boolean;
+  lastOpenedAt?: number;
+  type?: 'page' | 'folder';
+  description?: string;
+  workspaceId?: string; // Optional for compatibility/reference
+  ownerId?: string; // Keep for now if needed, but workspaceId is primary
 }
 
-export interface Transaction {
+export interface Workspace {
   id: string;
-  date: string; // ISO Date string
-  merchant: string;
-  amount: number;
-  category: string;
-  paymentMethod?: string;
-  status: 'cleared' | 'pending';
-  notes?: string;
+  name: string;
+  type: 'private' | 'public';
+  ownerId: string;
+  inviteCode?: string;
+  createdAt: Date;
+  // Local-only property to store the current user's role
+  role?: 'owner' | 'member';
+  isProtected?: boolean;
 }
 
-export interface ExpenseSummary {
-  category: string;
-  amount: number;
-  color: string;
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName?: string;
+  photoURL?: string;
+  workspaceIds: string[];
+  darkMode?: boolean;
+  lastLogin?: Date;
 }
 
 export enum ViewMode {
   Page = 'PAGE',
   Dashboard = 'DASHBOARD',
-  Expenses = 'EXPENSES',
   Settings = 'SETTINGS'
 }

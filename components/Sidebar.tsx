@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { ViewMode, Page } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { ViewMode, Page, Workspace } from '../types';
+import { WorkspaceSelector } from './WorkspaceSelector';
+import { InviteDialog } from './InviteDialog';
 import {
   Layout,
   Search,
-  CreditCard,
   Settings,
   Plus,
   FileText,
@@ -11,12 +12,13 @@ import {
   ChevronDown,
   MoreHorizontal,
   Trash2,
-  Star
+  Star,
+  Folder,
+  Pencil
 } from 'lucide-react';
 
 interface SidebarProps {
   pages: Page[];
-  currentView: ViewMode;
   activePageId: string | null;
   onViewChange: (mode: ViewMode) => void;
   onPageSelect: (id: string) => void;
@@ -26,11 +28,22 @@ interface SidebarProps {
   onToggleFavorite: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onSearch: () => void;
+  onAddFolder: () => void;
+  onRenamePage: (id: string, newName: string) => void;
+  currentView: ViewMode;
+  // Workspace Props
+  workspaces: Workspace[];
+  activeWorkspaceId: string | null;
+  onWorkspaceChange: (id: string) => void;
+  onJoinWorkspace: (ws: Workspace) => void;
+  onWorkspaceRenamed: (id: string, name: string) => void;
+  onWorkspaceDeleted: (id: string) => void;
+  userId: string;
+  userEmail?: string;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   pages,
-  currentView,
   activePageId,
   onViewChange,
   onPageSelect,
@@ -39,20 +52,46 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeletePage,
   onToggleFavorite,
   onToggleExpand,
-  onSearch
+  currentView,
+  onAddFolder,
+  onRenamePage,
+  workspaces,
+  activeWorkspaceId,
+  onWorkspaceChange,
+  onWorkspaceCreated,
+  onJoinWorkspace,
+  onWorkspaceRenamed,
+  onWorkspaceDeleted,
+  userId,
+  userEmail
 }) => {
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
   const favorites = pages.filter(p => p.isFavorite);
-  const rootPages = pages.filter(p => !p.parentId);
+  const rootPages = pages.filter(p => !p.parentId && p.type !== 'folder');
+  const folders = pages.filter(p => p.type === 'folder' && !p.parentId);
 
   return (
     <div className="w-64 bg-[#F7F7F5] dark:bg-[#090909] border-r border-[#EBEBEA] dark:border-gray-800 h-screen flex flex-col text-[#37352F] dark:text-gray-300 transition-colors select-none">
 
-      {/* User / Workspace Switcher */}
-      <div className="p-4 flex items-center gap-2 hover:bg-[#EFEFED] dark:hover:bg-gray-800 cursor-pointer transition-colors m-2 rounded-md">
-        <div className="w-5 h-5 bg-orange-500 rounded text-white text-xs flex items-center justify-center font-bold">C</div>
-        <span className="font-medium text-sm truncate dark:text-gray-200">My Workspace</span>
-        <div className="ml-auto text-xs border border-gray-300 dark:border-gray-600 rounded px-1 text-gray-500 dark:text-gray-400">Free</div>
-      </div>
+      {/* Workspace Selector */}
+      <WorkspaceSelector
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId || ''}
+        onWorkspaceChange={onWorkspaceChange}
+        onWorkspaceCreated={onWorkspaceCreated}
+        onJoinRequest={() => setShowInviteDialog(true)}
+        userId={userId}
+        userEmail={userEmail}
+        onWorkspaceRenamed={onWorkspaceRenamed}
+        onWorkspaceDeleted={onWorkspaceDeleted}
+      />
+
+      <InviteDialog
+        isOpen={showInviteDialog}
+        onClose={() => setShowInviteDialog(false)}
+        onJoin={onJoinWorkspace}
+        userId={userId}
+      />
 
       {/* Main Navigation */}
       <div className="flex-1 overflow-y-auto py-2">
@@ -63,12 +102,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             label="Dashboard"
             isActive={currentView === ViewMode.Dashboard}
             onClick={() => onViewChange(ViewMode.Dashboard)}
-          />
-          <NavItem
-            icon={<CreditCard size={16} />}
-            label="Expenses"
-            isActive={currentView === ViewMode.Expenses}
-            onClick={() => onViewChange(ViewMode.Expenses)}
           />
           <NavItem
             icon={<Settings size={16} />}
@@ -94,10 +127,58 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
+        {/* Databases Section Removed - Databases are now Pages */
+        /*
+        {databases.length > 0 && (
+          <div className="px-3 mb-4">
+            <SectionHeader title="Databases" />
+            {databases.map(db => (
+              <NavItem
+                key={`db-${db.id}`}
+                icon={<DbIcon size={16} />}
+                label={db.title}
+                isActive={currentView === ViewMode.Database && activeDatabaseId === db.id}
+                onClick={() => onDatabaseSelect(db.id)}
+              />
+            ))}
+          </div>
+        )}
+        */}
+
+        {/* Folders Tree */}
+        <div className="px-3 mb-4">
+          <div className="group flex items-center justify-between text-xs font-semibold text-gray-500 mb-1 px-2">
+            <span>FOLDERS</span>
+            <button onClick={onAddFolder} className="opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 rounded p-0.5 transition-opacity">
+              <Plus size={14} />
+            </button>
+          </div>
+
+          {folders.map(folder => (
+            <PageItem
+              key={folder.id}
+              page={folder}
+              allPages={pages}
+              activePageId={activePageId}
+              onPageSelect={onPageSelect}
+              onAddSubPage={onAddSubPage}
+              onDeletePage={onDeletePage}
+              onToggleFavorite={onToggleFavorite}
+              onToggleExpand={onToggleExpand}
+              onRenamePage={onRenamePage}
+              depth={0}
+            />
+          ))}
+
+          {folders.length === 0 && (
+            <div className="px-2 text-xs text-gray-400 italic py-1">No folders.</div>
+          )}
+        </div>
+
         {/* Pages Tree */}
         <div className="px-3">
           <div className="group flex items-center justify-between text-xs font-semibold text-gray-500 mb-1 px-2">
-            <span>PRIVATE</span>
+            <span>PAGES</span>
             <button onClick={onAddPage} className="opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 rounded p-0.5 transition-opacity">
               <Plus size={14} />
             </button>
@@ -114,6 +195,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               onDeletePage={onDeletePage}
               onToggleFavorite={onToggleFavorite}
               onToggleExpand={onToggleExpand}
+              onRenamePage={onRenamePage}
               depth={0}
             />
           ))}
@@ -147,12 +229,57 @@ const PageItem: React.FC<{
   onDeletePage: (id: string) => void;
   onToggleFavorite: (id: string) => void;
   onToggleExpand: (id: string) => void;
+  onRenamePage: (id: string, newName: string) => void;
   depth: number;
-}> = ({ page, allPages, activePageId, onPageSelect, onAddSubPage, onDeletePage, onToggleFavorite, onToggleExpand, depth }) => {
+}> = ({ page, allPages, activePageId, onPageSelect, onAddSubPage, onDeletePage, onToggleFavorite, onToggleExpand, onRenamePage, depth }) => {
   const [showMenu, setShowMenu] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(page.title);
+  const inputRef = useRef<HTMLInputElement>(null);
   const childPages = allPages.filter(p => p.parentId === page.id);
   const hasChildren = childPages.length > 0;
   const isActive = activePageId === page.id;
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  // Sync editName with page.title when page changes
+  useEffect(() => {
+    setEditName(page.title);
+  }, [page.title]);
+
+  const handleStartRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowMenu(false);
+    setEditName(page.title);
+    setIsEditing(true);
+  };
+
+  const handleSaveRename = () => {
+    const newName = editName.trim() || 'Untitled';
+    onRenamePage(page.id, newName);
+    setIsEditing(false);
+  };
+
+  const handleCancelRename = () => {
+    setEditName(page.title);
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveRename();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleCancelRename();
+    }
+  };
 
   return (
     <>
@@ -171,31 +298,53 @@ const PageItem: React.FC<{
           ) : <div className="w-3 h-3" />}
         </div>
 
-        <div className="flex-1 flex items-center gap-2 truncate cursor-pointer" onClick={() => onPageSelect(page.id)}>
-          <FileText size={14} className={isActive ? "text-gray-800 dark:text-gray-200" : "text-gray-400"} />
-          <span className="truncate">{page.title}</span>
+        <div className="flex-1 flex items-center gap-2 truncate cursor-pointer" onClick={() => !isEditing && onPageSelect(page.id)}>
+          {page.type === 'folder' ? (
+            <Folder size={14} className={isActive ? "text-gray-800 dark:text-gray-200" : "text-gray-400"} />
+          ) : (
+            <FileText size={14} className={isActive ? "text-gray-800 dark:text-gray-200" : "text-gray-400"} />
+          )}
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={handleSaveRename}
+              onClick={(e) => e.stopPropagation()}
+              className="flex-1 bg-white dark:bg-gray-700 border border-blue-500 rounded px-1 py-0.5 text-sm outline-none min-w-0"
+            />
+          ) : (
+            <span className="truncate">{page.title}</span>
+          )}
         </div>
 
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); onAddSubPage(page.id); }} className="hover:bg-gray-300 dark:hover:bg-gray-600 p-0.5 rounded text-gray-500">
-            <Plus size={12} />
-          </button>
-          <div className="relative">
-            <button onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} className="hover:bg-gray-300 dark:hover:bg-gray-600 p-0.5 rounded text-gray-500">
-              <MoreHorizontal size={12} />
+        {!isEditing && (
+          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1">
+            <button onClick={(e) => { e.stopPropagation(); onAddSubPage(page.id); }} className="hover:bg-gray-300 dark:hover:bg-gray-600 p-0.5 rounded text-gray-500">
+              <Plus size={12} />
             </button>
-            {showMenu && (
-              <div className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 rounded z-50 py-1 flex flex-col text-xs" onMouseLeave={() => setShowMenu(false)}>
-                <button className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-left flex items-center gap-2" onClick={(e) => { e.stopPropagation(); setShowMenu(false); onToggleFavorite(page.id); }}>
-                  <Star size={12} /> {page.isFavorite ? 'Unfavorite' : 'Favorite'}
-                </button>
-                <button className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-red-600 flex items-center gap-2" onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDeletePage(page.id); }}>
-                  <Trash2 size={12} /> Delete
-                </button>
-              </div>
-            )}
+            <div className="relative">
+              <button onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }} className="hover:bg-gray-300 dark:hover:bg-gray-600 p-0.5 rounded text-gray-500">
+                <MoreHorizontal size={12} />
+              </button>
+              {showMenu && (
+                <div className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 rounded z-50 py-1 flex flex-col text-xs" onMouseLeave={() => setShowMenu(false)}>
+                  <button className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-left flex items-center gap-2" onClick={handleStartRename}>
+                    <Pencil size={12} /> Rename
+                  </button>
+                  <button className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-left flex items-center gap-2" onClick={(e) => { e.stopPropagation(); setShowMenu(false); onToggleFavorite(page.id); }}>
+                    <Star size={12} /> {page.isFavorite ? 'Unfavorite' : 'Favorite'}
+                  </button>
+                  <button className="px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-red-600 flex items-center gap-2" onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDeletePage(page.id); }}>
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {page.isExpanded && hasChildren && (
@@ -211,6 +360,7 @@ const PageItem: React.FC<{
               onDeletePage={onDeletePage}
               onToggleFavorite={onToggleFavorite}
               onToggleExpand={onToggleExpand}
+              onRenamePage={onRenamePage}
               depth={depth + 1}
             />
           ))}

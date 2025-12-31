@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Block, BlockType } from '../../../types';
-import { CheckSquare, ChevronRight, ChevronDown, Info, Plus, FileText, Link } from 'lucide-react';
+import { CheckSquare, ChevronRight, ChevronDown, Info, Plus, FileText } from 'lucide-react';
+import { CodeBlock } from './CodeBlock';
 
 interface EditableBlockProps {
     block: Block;
@@ -19,21 +20,32 @@ interface EditableBlockProps {
     indexInList?: number;
     isCollapsed?: boolean;
     onToggleCollapse?: () => void;
+    isPageTitle?: boolean;
 }
 
 export const EditableBlock: React.FC<EditableBlockProps> = ({
     block, isFocused, onUpdate, onFocus, onAddNext, onDelete,
     onOpenMenu, slashMenuOpen, onSlashFilterChange, onNavigateUp, onNavigateDown, onRequestSuggestion,
-    indexInList, onNavigateToPage, isCollapsed, onToggleCollapse
+    indexInList, onNavigateToPage, isCollapsed, onToggleCollapse, isPageTitle
 }) => {
     const contentRef = useRef<HTMLDivElement>(null);
+    const lastContentRef = useRef<string>(block.content);
 
-    // Sync content updates
+    // Sync content updates - always update if content changed externally
     useEffect(() => {
-        if (contentRef.current && block.content !== contentRef.current.innerHTML) {
-            contentRef.current.innerHTML = block.content;
+        if (contentRef.current) {
+            // Check if content changed from external source (not from user typing)
+            const currentInnerHTML = contentRef.current.innerHTML;
+            if (block.content !== lastContentRef.current) {
+                // External update - force sync
+                contentRef.current.innerHTML = block.content;
+                lastContentRef.current = block.content;
+            } else if (block.content !== currentInnerHTML && !isFocused) {
+                // Not focused and content differs - sync it
+                contentRef.current.innerHTML = block.content;
+            }
         }
-    }, [block.content]);
+    }, [block.content, isFocused]);
 
     // Focus Management
     useEffect(() => {
@@ -80,12 +92,15 @@ export const EditableBlock: React.FC<EditableBlockProps> = ({
             else if (cleanText === '```') matchedType = BlockType.Code;
 
             if (matchedType) {
+                lastContentRef.current = '';
                 onUpdate({ type: matchedType, content: '' });
                 if (contentRef.current) contentRef.current.innerHTML = '';
                 return;
             }
         }
 
+        // Track content changes from user input
+        lastContentRef.current = newContent;
         onUpdate({ content: newContent });
     };
 
@@ -110,6 +125,11 @@ export const EditableBlock: React.FC<EditableBlockProps> = ({
                 onAddNext();
             }
         } else if (e.key === 'Backspace') {
+            // Protect page title from deletion - just ignore backspace when empty
+            if (isPageTitle && !contentRef.current?.textContent) {
+                e.preventDefault();
+                return;
+            }
             if (block.type === BlockType.Page || block.type === BlockType.PageLink) {
                 e.preventDefault();
                 onDelete();
@@ -146,6 +166,12 @@ export const EditableBlock: React.FC<EditableBlockProps> = ({
         }
     };
 
+    const handlePaste = (e: React.ClipboardEvent) => {
+        e.preventDefault();
+        const text = e.clipboardData.getData('text/plain');
+        document.execCommand('insertText', false, text);
+    };
+
     const getBlockStyles = () => {
         switch (block.type) {
             case BlockType.Heading1: return "text-3xl font-bold mt-8 mb-1 dark:text-gray-100 leading-tight";
@@ -155,7 +181,6 @@ export const EditableBlock: React.FC<EditableBlockProps> = ({
             case BlockType.Heading5: return "text-base font-semibold mt-2 mb-1 dark:text-gray-300 leading-snug";
             case BlockType.Heading6: return "text-sm font-semibold mt-2 mb-1 text-gray-500 dark:text-gray-400 uppercase tracking-wider";
             case BlockType.Quote: return "border-l-[3px] border-gray-900 dark:border-gray-500 pl-4 py-1 my-2 text-[#37352f] dark:text-gray-300 opacity-90 italic leading-relaxed";
-            case BlockType.Code: return "font-mono text-[14px] bg-[#f7f6f3] dark:bg-gray-800 p-4 rounded text-gray-800 dark:text-gray-200 my-2 block w-full border border-gray-200 dark:border-gray-700";
             case BlockType.Callout: return "bg-gray-50 dark:bg-gray-800 p-4 rounded-lg flex gap-3 text-gray-900 dark:text-gray-100 border border-gray-100 dark:border-gray-700";
             case BlockType.Page: return "text-gray-900 dark:text-gray-100 font-medium border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 py-2.5 transition-colors flex items-center gap-2 group/page";
             case BlockType.PageLink: return "text-purple-600 dark:text-purple-400 font-medium underline decoration-purple-300 underline-offset-4 flex items-center gap-1 hover:text-purple-700 transition-colors";
@@ -233,21 +258,20 @@ export const EditableBlock: React.FC<EditableBlockProps> = ({
                     </div>
                 )}
 
-                {block.type === BlockType.PageLink && (
-                    <div
-                        className="mr-2 text-purple-500 dark:text-purple-400 mt-0.5 select-none cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-900/40 rounded p-0.5 transition-colors"
-                        contentEditable={false}
-                        onClick={() => {
-                            if (block.pageId && onNavigateToPage) {
-                                onNavigateToPage(block.pageId);
-                            }
-                        }}
-                    >
-                        <Link size={16} />
-                    </div>
-                )}
 
-                {block.type === BlockType.Divider ? (
+
+                {block.type === BlockType.Code ? (
+                    <CodeBlock
+                        content={block.content}
+                        language={block.language || 'plaintext'}
+                        onChange={(newContent) => onUpdate({ content: newContent })}
+                        onLanguageChange={(newLang) => onUpdate({ language: newLang })}
+                        onFocus={onFocus}
+                        onBlur={() => { /* Optional blur handling */ }}
+                        onDelete={onDelete}
+                        onExit={onAddNext}
+                    />
+                ) : block.type === BlockType.Divider ? (
                     <div className="w-full py-2 relative" onClick={onFocus}>
                         <hr className={`border-gray-200 dark:border-gray-700 ${isFocused ? 'border-blue-300 dark:border-blue-500' : ''}`} />
                         <div ref={contentRef} contentEditable className="absolute opacity-0 w-0 h-0 overflow-hidden" onKeyDown={handleKeyDown} onFocus={onFocus} />
@@ -258,18 +282,20 @@ export const EditableBlock: React.FC<EditableBlockProps> = ({
                         contentEditable
                         suppressContentEditableWarning
                         className={`
-                w-full outline-none
+                w-full outline-none relative
                 ${getBlockStyles()}
                 ${block.checked && block.type === BlockType.Todo ? 'line-through text-gray-400 dark:text-gray-600' : ''}
                 ${showPlaceholder ? 'before:content-[attr(placeholder)] before:text-gray-300 dark:before:text-gray-600 before:absolute before:pointer-events-none' : ''}
+                ${isPageTitle && isEmpty && !isFocused ? 'before:content-["Untitled"] before:text-gray-300 dark:before:text-gray-500 before:absolute before:pointer-events-none before:opacity-50' : ''}
                 ${block.type === BlockType.Callout ? '!bg-transparent !p-0' : ''}
                 ${block.type === BlockType.Page || block.type === BlockType.PageLink ? 'select-none' : ''}
             `}
                         onInput={handleInput}
+                        onPaste={handlePaste}
                         onKeyDown={handleKeyDown}
                         onFocus={onFocus}
                         onBlur={() => { /* Save handled onInput */ }}
-                        placeholder={block.type === BlockType.Text ? "Type '/' for commands" : `Heading ${block.type.replace('h', '')}`}
+                        placeholder={isPageTitle ? 'Untitled' : (block.type === BlockType.Text ? "Type '/' for commands" : `Heading ${block.type.replace('h', '')}`)}
                     />
                 )}
             </div>
