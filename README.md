@@ -116,7 +116,3 @@ This project exists as much to **learn real system design tradeoffs** as to buil
 - Designing for real users, not assignments
 
 ---
-
-## License
-
-MIT (or your preferred license)
